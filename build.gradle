@@ -179,7 +179,49 @@ dependencies {
     compileOnly("curse.maven:xaeros-world-map-317780:7401095")
 }
 
+// ---- Create Ultimate: Addon-Quellen aus roh/ in die eine Create-Jar einbauen ----
+// Jeder Ordner roh/<addon>/ mit src/main/java (und optional src/main/resources) wird beim
+// Kompilieren Teil des main-Source-Sets, sodass am Ende genau eine Jar entsteht.
+// Zusätzliche Abhängigkeiten der Addons kommen in roh/dependencies.gradle (optional, wird mit
+// apply from eingebunden). Metadaten, die nicht einfach zusammenfallen dürfen, werden NICHT
+// automatisch übernommen und stattdessen gemeldet (siehe docs/BUNDLING.md).
+def rohDir = file("roh")
+def rohAddons = rohDir.exists() ? rohDir.listFiles().findAll { it.isDirectory() && !it.name.startsWith(".") }.sort { it.name } : []
+def rohExcludedMetadata = ["META-INF/neoforge.mods.toml", "META-INF/mods.toml", "META-INF/accesstransformer.cfg", "pack.mcmeta", "icon.png", "mcmod.info"]
+
+def stageRohResources = tasks.register("stageRohResources", Sync) {
+    into(layout.buildDirectory.dir("roh-resources"))
+    rohAddons.each { addon ->
+        def res = new File(addon, "src/main/resources")
+        if (res.exists()) {
+            from(res) { exclude(rohExcludedMetadata) }
+        }
+    }
+    duplicatesStrategy = DuplicatesStrategy.FAIL // doppelte Ressourcen zwischen Addons sind ein Fehler, kein stiller Überschreib
+}
+
+rohAddons.each { addon ->
+    def res = new File(addon, "src/main/resources")
+    if (res.exists()) {
+        rohExcludedMetadata.findAll { new File(res, it).exists() }.each {
+            logger.warn("[roh/${addon.name}] ${it} wird nicht automatisch übernommen - manuell in Create zusammenführen")
+        }
+    }
+}
+
+if (file("roh/dependencies.gradle").exists()) {
+    apply from: "roh/dependencies.gradle"
+}
+
 sourceSets.main {
+    rohAddons.each { addon ->
+        def javaDir = new File(addon, "src/main/java")
+        if (javaDir.exists()) {
+            java.srcDir(javaDir)
+        }
+    }
+    resources.srcDir(stageRohResources)
+
     java {
         if (!cc_tweaked_enable.toBoolean()) {
             exclude("com/simibubi/create/compat/computercraft/implementation/**")
